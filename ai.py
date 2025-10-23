@@ -1,6 +1,11 @@
 import os, json
+import streamlit as st
 from dotenv import load_dotenv
+from openai import OpenAI
+
 load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # DEMO / fallback: niente chiamate API se non vuoi o non puoi usare i crediti
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
