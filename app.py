@@ -12,14 +12,9 @@ if os.getenv("DEMO_MODE", "false").lower() == "true":
         icon="⚠️"
     )
 
-# Titolo + secondo banner DEMO
+# Titolo
 st.markdown("<h1 style='color:#7B61FF'>Synapse — Learn smarter.</h1>", unsafe_allow_html=True)
-if os.getenv("DEMO_MODE", "false").lower() == "true":
-    st.warning(
-        "DEMO MODE attivo: i piani sono generati senza chiamare l'API OpenAI. "
-        "Per sbloccare l'AI reale: attiva Billing su OpenAI e metti DEMO_MODE=false.",
-        icon="⚠️"
-    )
+
 
 # ---------- CSS: colori per gli header degli expander ----------
 st.markdown("""
