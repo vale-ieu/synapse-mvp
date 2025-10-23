@@ -1,8 +1,5 @@
-streamlit==1.36.0
-openai==1.51.2
-python-dotenv==1.0.1
-supabase==2.4.6
-postgrest==2.1.0
-realtime==2.0.2
-storage3==0.7.5
-requests>=2.31
+streamlit
+openai>=1.30.0
+python-dotenv
+supabase
+pandas
