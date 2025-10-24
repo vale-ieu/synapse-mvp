@@ -1,63 +1,28 @@
 import os
 import json
+from pathlib import Path
 import streamlit as st
 from ai import generate_plan, tutor_answer
-from db import (
-    upsert_user, save_plan, list_plans,
-    get_progress_map, set_progress,
-    update_plan_topic, delete_plan,
-)
+from db import upsert_user, save_plan, list_plans, get_progress_map, set_progress, update_plan_topic, delete_plan
 
-st.set_page_config(page_title="Synapse MVP", page_icon="🧠", layout="wide")
+# ========================= PAGE CONFIG =========================
+st.set_page_config(page_title="Synapse — Learn smarter.", page_icon="🧠", layout="wide")
 
-# ---------------- Banner DEMO MODE ----------------
-if os.getenv("DEMO_MODE", "false").lower() == "true":
-    st.warning(
-        "⚠️ DEMO MODE attivo: nessuna chiamata OpenAI. "
-        "Imposta DEMO_MODE=false e configura OPENAI_API_KEY per usare l'AI."
-    )
-
-# ---------------- Titolo ----------------
-st.markdown("<h1 style='color:#7B61FF'>Synapse — Learn smarter.</h1>", unsafe_allow_html=True)
-
-# ---------------- CSS per expander colorati ----------------
+# ========================= CSS GLOBALE =========================
 st.markdown("""
 <style>
-.step-todo  [data-testid="stExpander"] summary,
-.step-todo  [data-testid="stExpander"] div[role="button"],
-.step-doing [data-testid="stExpander"] summary,
-.step-doing [data-testid="stExpander"] div[role="button"],
-.step-done  [data-testid="stExpander"] summary,
-.step-done  [data-testid="stExpander"] div[role="button"] {
-  border-radius: 10px !important;
-  border: 1px solid transparent !important;
-  font-weight: 700 !important;
-  transition: background .15s ease, border-color .15s ease;
+[data-testid="stSidebar"] img {
+    border-radius: 50%;
 }
-.step-todo  [data-testid="stExpander"] summary,
-.step-todo  [data-testid="stExpander"] div[role="button"] {
-  background: rgba(185, 28, 28, 0.20) !important;
-  border-color: rgba(185, 28, 28, 0.45) !important;
-  color: #fff !important;
-}
-.step-doing [data-testid="stExpander"] summary,
-.step-doing [data-testid="stExpander"] div[role="button"] {
-  background: rgba(245, 158, 11, 0.25) !important;
-  border-color: rgba(245, 158, 11, 0.55) !important;
-  color: #111 !important;
-}
-.step-done  [data-testid="stExpander"] summary,
-.step-done  [data-testid="stExpander"] div[role="button"] {
-  background: rgba(34, 197, 94, 0.25) !important;
-  border-color: rgba(34, 197, 94, 0.55) !important;
-  color: #111 !important;
+[data-testid="stSidebar"] {
+    padding-top: 0.5rem;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ========================= Helpers =========================
 def plan_completion_percent(plan) -> int:
-    """Calcola la % completamento per un piano."""
+    """Calcola la % di completamento di un piano."""
     pj = plan["plan_json"]
     if isinstance(pj, str):
         try:
@@ -72,10 +37,27 @@ def plan_completion_percent(plan) -> int:
     return int((done / len(steps)) * 100)
 
 # =========================================================
-# Sidebar: mock sign-in + new plan + lista piani
+# Sidebar con logo Synapse e login
 # =========================================================
+APP_DIR = Path(__file__).parent
+LOGO_PATH = APP_DIR / "static" / "logo.png"  # percorso assoluto sicuro
+
 with st.sidebar:
-    st.subheader("Sign in (mock)")
+    # --- logo in alto, piccolo e centrato ---
+    st.markdown(
+        "<div style='text-align:center; margin-top:-25px; margin-bottom:-5px;'>",
+        unsafe_allow_html=True
+    )
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=55)
+    else:
+        st.warning("Logo non trovato in /static/logo.png")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- titolo login ---
+    st.markdown("<h2 style='text-align:center; margin-top:-5px;'>Sign in</h2>", unsafe_allow_html=True)
+
+    # --- form login ---
     email = st.text_input("Email", placeholder="you@example.com", key="sb_email")
     if st.button("Continue", key="sb_continue") and email:
         st.session_state["user"] = upsert_user(email)
@@ -85,9 +67,7 @@ with st.sidebar:
 
         st.markdown("---")
         # -------- Bottone "New plan" --------
-        if "show_generator" not in st.session_state:
-            st.session_state.show_generator = False
-
+        st.session_state.setdefault("show_generator", False)
         if st.button("➕ New plan", use_container_width=True, key="btn_new_plan_sidebar"):
             st.session_state.show_generator = True
             st.rerun()
@@ -98,74 +78,55 @@ with st.sidebar:
         plans_sidebar = list_plans(st.session_state["user"]["id"])
 
         # init stato selezione/modali
-        if "selected_plan_id" not in st.session_state:
-            st.session_state.selected_plan_id = plans_sidebar[0]["id"] if plans_sidebar else None
-        if "rename_target" not in st.session_state:
-            st.session_state.rename_target = None
-        if "delete_target" not in st.session_state:
-            st.session_state.delete_target = None
+        st.session_state.setdefault("selected_plan_id", plans_sidebar[0]["id"] if plans_sidebar else None)
+        st.session_state.setdefault("rename_target", None)          # id del piano che è in modalità edit
+        st.session_state.setdefault("rename_value", "")             # valore provvisorio del nome
+        st.session_state.setdefault("delete_target", None)
+        st.session_state.setdefault("show_delete_modal", False)
 
         if not plans_sidebar:
             st.info("No plans yet. Create one with 'New plan'.")
         else:
             for p in plans_sidebar:
                 pct = plan_completion_percent(p)
+                # riga a 3 colonne; se in edit, la prima col diventa un text_input inline
                 c1, c2, c3 = st.columns([7, 1, 1])
-
                 selected = p["id"] == st.session_state.selected_plan_id
-                label_icon = "📘" if selected else "📁"
-                label = f"{label_icon} {p['topic']} — {pct}%"
+                icon = "📘" if selected else "📁"
 
-                if c1.button(label, key=f"sel_{p['id']}", use_container_width=True):
-                    st.session_state.selected_plan_id = p["id"]
-                    st.session_state.rename_target = None
-                    st.session_state.delete_target = None
-                    st.rerun()
-
-                if c2.button("✏️", key=f"ed_{p['id']}"):
-                    st.session_state.rename_target = p["id"]
-                    st.session_state.delete_target = None
-
-                if c3.button("🗑️", key=f"rm_{p['id']}"):
-                    st.session_state.delete_target = p["id"]
-                    st.session_state.rename_target = None
-
-            # Expander rename
-            if st.session_state.rename_target:
-                plan_to_edit = next((x for x in plans_sidebar if x["id"] == st.session_state.rename_target), None)
-                if plan_to_edit:
-                    with st.expander(f"Rename '{plan_to_edit['topic']}'", expanded=True):
-                        nn = st.text_input("New name", value=plan_to_edit["topic"], key="sb_rename_input")
-                        cc1, cc2 = st.columns(2)
-                        if cc1.button("Save", key="sb_rename_save"):
-                            if nn.strip():
-                                update_plan_topic(plan_to_edit["id"], nn.strip())
-                                st.success("Name updated.")
-                                st.session_state.rename_target = None
-                                st.rerun()
-                            else:
-                                st.error("Name cannot be empty.")
-                        if cc2.button("Cancel", key="sb_rename_cancel"):
+                if st.session_state.rename_target == p["id"]:
+                    # --- modalità RINOMINA INLINE ---
+                    st.session_state.rename_value = st.session_state.rename_value or p["topic"]
+                    new_name = c1.text_input("", value=st.session_state.rename_value, key=f"edit_name_{p['id']}")
+                    st.session_state.rename_value = new_name
+                    save_col, cancel_col = c2, c3
+                    if save_col.button("✅", key=f"save_{p['id']}"):
+                        nn = (st.session_state.rename_value or "").strip()
+                        if nn:
+                            update_plan_topic(p["id"], nn)
                             st.session_state.rename_target = None
-
-            # Expander delete
-            if st.session_state.delete_target:
-                plan_to_del = next((x for x in plans_sidebar if x["id"] == st.session_state.delete_target), None)
-                if plan_to_del:
-                    with st.expander(f"Delete '{plan_to_del['topic']}'", expanded=True):
-                        st.warning("This will permanently delete the plan and its progress.")
-                        conf = st.text_input("Type DELETE to confirm", key="sb_del_conf")
-                        disabled = conf.strip().upper() != "DELETE"
-                        dcc1, dcc2 = st.columns(2)
-                        if dcc1.button("Confirm delete", type="secondary", disabled=disabled, key="sb_del_ok"):
-                            delete_plan(plan_to_del["id"])
-                            st.success("Plan deleted.")
-                            remain = [x for x in plans_sidebar if x["id"] != plan_to_del["id"]]
-                            st.session_state.selected_plan_id = remain[0]["id"] if remain else None
-                            st.session_state.delete_target = None
+                            st.session_state.rename_value = ""
                             st.rerun()
-                        if dcc2.button("Cancel", key="sb_del_cancel"):
-                            st.session_state.delete_target = None
+                        else:
+                            st.error("Name cannot be empty.")
+                    if cancel_col.button("✖️", key=f"cancel_{p['id']}"):
+                        st.session_state.rename_target = None
+                        st.session_state.rename_value = ""
+                        st.rerun()
+                else:
+                    # --- visualizzazione normale ---
+                    label = f"{icon} {p['topic']} — {pct}%"
+                    if c1.button(label, key=f"sel_{p['id']}", use_container_width=True):
+                        st.session_state.selected_plan_id = p["id"]
+                        st.rerun()
+                    if c2.button("✏️", key=f"ed_{p['id']}"):
+                        st.session_state.rename_target = p["id"]
+                        st.session_state.rename_value = p["topic"]
+                        st.rerun()
+                    if c3.button("🗑️", key=f"rm_{p['id']}"):
+                        st.session_state.delete_target = p["id"]
+                        st.session_state.show_delete_modal = True
+                        st.rerun()
 
 # Se non loggato, fermati qui
 if "user" not in st.session_state:
@@ -175,7 +136,52 @@ if "user" not in st.session_state:
 user = st.session_state["user"]
 
 # =========================================================
-# Corpo centrale: mostra generatore solo se richiesto
+# POPUP di conferma eliminazione (usa st.dialog come decoratore;
+# fallback inline se la tua versione non lo supporta)
+# =========================================================
+if st.session_state.get("show_delete_modal") and st.session_state.get("delete_target"):
+    all_plans = list_plans(user["id"])
+    plan_to_del = next((x for x in all_plans if x["id"] == st.session_state["delete_target"]), None)
+    plan_name = plan_to_del["topic"] if plan_to_del else "this plan"
+
+    if hasattr(st, "dialog"):
+        @st.dialog("Confirm deletion")   # <-- decoratore, non context manager
+        def _confirm_delete_dialog():
+            st.error(f"Delete '{plan_name}'? This action is permanent.")
+            col_ok, col_cancel = st.columns(2)
+            if col_ok.button("OK, delete", type="primary", key="dialog_del_ok"):
+                delete_plan(st.session_state["delete_target"])
+                remaining = [x for x in all_plans if x["id"] != st.session_state["delete_target"]]
+                st.session_state.selected_plan_id = remaining[0]["id"] if remaining else None
+                st.session_state.delete_target = None
+                st.session_state.show_delete_modal = False
+                st.rerun()
+            if col_cancel.button("Cancel", key="dialog_del_cancel"):
+                st.session_state.delete_target = None
+                st.session_state.show_delete_modal = False
+                st.rerun()
+
+        _confirm_delete_dialog()  # mostra la dialog
+
+    else:
+        # Fallback compatibile: piccolo box in pagina
+        st.warning(f"Delete '{plan_name}'? This action is permanent.")
+        col_ok, col_cancel = st.columns(2)
+        if col_ok.button("OK, delete", type="primary", key="fallback_del_ok"):
+            delete_plan(st.session_state["delete_target"])
+            remaining = [x for x in all_plans if x["id"] != st.session_state["delete_target"]]
+            st.session_state.selected_plan_id = remaining[0]["id"] if remaining else None
+            st.session_state.delete_target = None
+            st.session_state.show_delete_modal = False
+            st.rerun()
+        if col_cancel.button("Cancel", key="fallback_del_cancel"):
+            st.session_state.delete_target = None
+            st.session_state.show_delete_modal = False
+            st.rerun()
+
+
+# =========================================================
+# Corpo centrale: generatore solo se richiesto
 # =========================================================
 if st.session_state.get("show_generator", False):
     st.write("### Generate your learning plan")
