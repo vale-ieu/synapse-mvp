@@ -8,6 +8,16 @@ from db import upsert_user, save_plan, list_plans, get_progress_map, set_progres
 # ========================= PAGE CONFIG =========================
 st.set_page_config(page_title="Synapse — Learn smarter.", page_icon="🧠", layout="wide")
 
+# ---------------- Banner DEMO MODE ----------------
+if os.getenv("DEMO_MODE", "false").lower() == "true":
+    st.warning(
+        "⚠️ DEMO MODE attivo: nessuna chiamata OpenAI. "
+        "Imposta DEMO_MODE=false e configura OPENAI_API_KEY per usare l'AI."
+    )
+
+# ---------------- Titolo ----------------
+st.markdown("<h1 style='color:#7B61FF'>Synapse — Learn smarter.</h1>", unsafe_allow_html=True)
+
 # ========================= CSS GLOBALE =========================
 st.markdown("""
 <style>
