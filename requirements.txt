@@ -1,5 +1,5 @@
-streamlit
-openai>=1.30.0
-python-dotenv
-supabase
+streamlit 
+openai>=1.30.0 
+python-dotenv 
+supabase 
 pandas

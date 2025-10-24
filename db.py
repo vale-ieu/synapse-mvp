@@ -57,3 +57,18 @@ def set_progress(plan_id: str, step_index: int, status: str):
         .insert({"plan_id": plan_id, "step_index": step_index, "status": status})\
         .execute()
     return ins.data[0]
+
+def update_plan_topic(plan_id: str, new_topic: str):
+    supa = _client()
+    upd = supa.table("learning_plans")\
+        .update({"topic": new_topic})\
+        .eq("id", plan_id)\
+        .execute()
+    return upd.data[0]
+
+def delete_plan(plan_id: str):
+    supa = _client()
+    # prima cancello i progressi per evitare vincoli FK
+    supa.table("progress").delete().eq("plan_id", plan_id).execute()
+    supa.table("learning_plans").delete().eq("id", plan_id).execute()
+    return True
