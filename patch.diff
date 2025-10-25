@@ -1,0 +1,50 @@
+*** Begin Patch
+*** Update File: app.py
+@@
+-st.markdown("""
++st.markdown("""
+ <style>
+@@
+-/* ---- RIGA PIANO: BARRA UNICA con progress integrato ---- */
+-.planbar{
+-  position:relative;
+-  background:#262730 !important;
+-  border:1px solid #3a3b47 !important;     /* reintroduco solo qui il bordo */
+-  border-radius:10px !important;
+-  padding:4px 8px !important;
+-  margin:6px 0 !important;
+-  overflow:hidden;
+-}
+-.planbar.selected{ box-shadow:0 0 0 2px rgba(123,97,255,.35) inset !important; }
+-/* riaccendo SOLO il nostro ::before per la progress integrata */
+-section[data-testid="stSidebar"] .planbar::before{
+-  display:block !important; content:"" !important;
+-  position:absolute; left:0; top:0; bottom:0;
+-  width:var(--pct, 0%);
+-  background:linear-gradient(90deg, rgba(123,97,255,.28), rgba(123,97,255,.18));
+-  border-radius:inherit;
+-}
++/* ---- LISTA PIANI: nessuna barra/linea, spacing compatto ---- */
++/* rimuove qualunque bordo/linea generata dai wrapper Streamlit */
++section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div,
++section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:first-child{
++  border:0 !important; box-shadow:none !important; background:transparent !important;
++}
++section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div::before,
++section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div::after{
++  content:none !important; display:none !important;
++}
++
++/* riga piano senza bordo e senza overlay viola */
++.planbar{
++  position:relative;
++  background:#262730 !important;
++  border:none !important;
++  border-radius:10px !important;
++  padding:4px 8px !important;
++  margin:4px 0 !important;
++  overflow:hidden;
++}
++.planbar.selected{ box-shadow:0 0 0 2px rgba(123,97,255,.22) inset !important; }
++section[data-testid="stSidebar"] .planbar::before{ display:none !important; }
+*** End Patch
