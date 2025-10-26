@@ -6,11 +6,12 @@ import streamlit as st
 from ai import generate_plan, tutor_answer, generate_exercises_ai, explain_step_ai
 from db import (
     upsert_user, save_plan, list_plans,
-    get_progress_map, set_progress, update_plan_topic, delete_plan, update_plan_json
+    get_progress_map, set_progress, update_plan_topic, delete_plan, update_plan_json,
+    get_ai_cache, set_ai_cache
 )
 
 # ========================= PAGE CONFIG =========================
-st.set_page_config(page_title="Synapse — Impara meglio", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Synapse — Impara facilmente", page_icon="🧠", layout="wide")
 
 # ---------------- Banner DEMO MODE ----------------
 if os.getenv("DEMO_MODE", "false").lower() == "true":
@@ -332,6 +333,67 @@ def concept_map_radial_png(plan_json, topic: str, step_idx: int | None = None):
     bio = BytesIO(); img.save(bio, format="PNG"); bio.seek(0)
     return bio
 
+def concept_map_flow_png(plan_json, header: str | None = None):
+    """Mappa concettuale gerarchica a blocchi (stile libro scolastico)."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return None
+    steps = plan_json.get("steps", [])
+    labels = [s.get("title","") for s in steps]
+    # suddividi in 3-4 fasce
+    tiers = []
+    if labels:
+        tiers.append(labels[:2])
+        mid = max(2, len(labels)//3)
+        tiers.append(labels[2:2+mid])
+        tiers.append(labels[2+mid:])
+    else:
+        tiers = [["Introduzione"],["Sviluppo"],["Sintesi"]]
+
+    w,h = 1000, 900
+    img = Image.new("RGB", (w,h), (255,255,255))
+    dr = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
+
+    # colori e stile
+    col_box = (255, 247, 235)
+    col_border = (210, 150, 90)
+    col_head = (236, 170, 70)
+    col_text = (40, 40, 40)
+
+    # header
+    if header:
+        dr.rounded_rectangle([20,20,w-20,70], radius=8, fill=col_head)
+        dr.text((30,40), header, fill=(255,255,255), font=font)
+
+    top = 100
+    for t, row in enumerate(tiers):
+        if not row: continue
+        y = top + t*220
+        cols = len(row)
+        box_w, box_h = 280, 80
+        gap = (w - 80 - cols*box_w)//(cols-1) if cols>1 else 0
+        xs = [40 + i*(box_w+gap) for i in range(cols)]
+        centers = []
+        for i, label in enumerate(row):
+            x = xs[i]
+            dr.rounded_rectangle([x,y,x+box_w,y+box_h], radius=12, fill=col_box, outline=col_border, width=2)
+            dr.text((x+10,y+25), label, fill=col_text, font=font)
+            centers.append((x+box_w//2, y+box_h))
+        # connettori verticali con fascia successiva
+        if t < len(tiers)-1 and tiers[t+1]:
+            next_y = top + (t+1)*220
+            for cx,cy in centers:
+                dr.line([(cx, cy), (cx, next_y-20)], fill=col_border, width=2)
+
+    from io import BytesIO
+    bio = BytesIO(); img.save(bio, format="PNG"); bio.seek(0)
+    return bio
+
 # ========================= SHARE (read-only semplice) =========================
 read_only = False
 qp = st.query_params
@@ -521,8 +583,6 @@ if st.session_state.get("show_generator", False) and not read_only:
         topic = st.text_input("Argomento*", placeholder="es. Basi della Termodinamica")
     with col2:
         level = st.selectbox("Livello obiettivo*", ["beginner", "intermediate", "advanced"])  # valori in inglese per compatibilità
-    goal_mode = st.selectbox("Modalità", ["verifica_liceo", "esame_universita"], index=0, help="Scegli l'obiettivo: verifica di liceo (7–10 passi) o esame universitario (10–14 passi)")
-    st.session_state["goal_mode"] = goal_mode
 
     goals = st.text_area("Quale risultato vuoi ottenere? (opzionale)", placeholder="Esame, progetto, voto massimo, ecc.")
     st.markdown("**Opzionale: libro (PDF)** — verrà usato per arricchire il piano")
@@ -544,7 +604,7 @@ if st.session_state.get("show_generator", False) and not read_only:
                     st.warning(f"Impossibile leggere il PDF: {e}")
 
             with st.spinner("Preparo il piano..."):
-                plan = generate_plan(topic, level, 30, goal_mode)
+                plan = generate_plan(topic, level, 30, "misto")
                 if textbook_text:
                     try:
                         if "steps" in plan and plan["steps"]:
@@ -603,7 +663,7 @@ if not read_only:
     minimal_steps = len((plan_json or {}).get("steps", []))
     if not _expanded and minimal_steps and minimal_steps < 7:
         with st.spinner("Espando il piano per maggior dettaglio..."):
-            new_plan = generate_plan(current_plan["topic"], current_plan.get("level","beginner"), 30, st.session_state.get("goal_mode","verifica_liceo"))
+            new_plan = generate_plan(current_plan["topic"], current_plan.get("level","beginner"), 30, "misto")
             if (new_plan or {}).get("steps") and len(new_plan["steps"]) > minimal_steps:
                 update_plan_json(current_plan["id"], new_plan)
                 plan_json = new_plan
@@ -680,14 +740,19 @@ for i, step in enumerate(steps):
         st.session_state.setdefault("ai_explain", {})
         plan_expl = st.session_state["ai_explain"].setdefault(current_plan["id"], {})
         if i not in plan_expl:
-            with st.spinner("Creo spiegazione dettagliata..."):
-                md = explain_step_ai(
-                    plan_json,
-                    i,
-                    current_plan.get("level","beginner"),
-                    st.session_state.get("goal_mode","verifica_liceo")
-                )
-            plan_expl[i] = md
+            cached = get_ai_cache(current_plan["id"], i, "explain_md")
+            if cached is None:
+                with st.spinner("Creo spiegazione dettagliata..."):
+                    md = explain_step_ai(
+                        plan_json,
+                        i,
+                        current_plan.get("level","beginner"),
+                        "misto"
+                    )
+                set_ai_cache(current_plan["id"], i, "explain_md", md)
+                plan_expl[i] = md
+            else:
+                plan_expl[i] = cached
         st.markdown(plan_expl[i])
         if step.get("practice_tasks"):
             st.markdown("**Pratica**")
@@ -757,13 +822,25 @@ for i, step in enumerate(steps):
         st.session_state.setdefault("ai_exercises", {})
         plan_ex = st.session_state["ai_exercises"].setdefault(current_plan["id"], {})
         if i not in plan_ex:
-            with st.spinner("Creo esercizi con AI..."):
-                plan_ex[i] = generate_exercises_ai(
-                    plan_json,
-                    i,
-                    current_plan.get("level","beginner"),
-                    st.session_state.get("goal_mode","verifica_liceo")
-                )
+            cached = get_ai_cache(current_plan["id"], i, "exercises_json")
+            if cached is None:
+                with st.spinner("Creo esercizi con AI..."):
+                    data = generate_exercises_ai(
+                        plan_json,
+                        i,
+                        current_plan.get("level","beginner"),
+                        "misto"
+                    )
+                plan_ex[i] = data
+                try:
+                    set_ai_cache(current_plan["id"], i, "exercises_json", json.dumps(data, ensure_ascii=False))
+                except Exception:
+                    pass
+            else:
+                try:
+                    plan_ex[i] = json.loads(cached)
+                except Exception:
+                    plan_ex[i] = {}
         data = plan_ex.get(i)
         if data:
             st.markdown(f"**{data['guided']['title']}**")
@@ -782,13 +859,7 @@ for i, step in enumerate(steps):
             if txt:
                 wc = len(txt.split()); st.caption(f"Parole: {wc} (target {data['writing']['min']}–{data['writing']['max']})")
 
-        with st.expander("🧠 Mappa concettuale", expanded=False):
-            layout = st.radio("Layout", ["Radiale", "Griglia"], horizontal=True, key=f"maplayout_{i}")
-            img = concept_map_radial_png(plan_json, current_plan.get("topic",""), i) if layout=="Radiale" else concept_map_png(plan_json, step_idx=i)
-            if img is not None:
-                st.image(img, use_container_width=True)
-            else:
-                st.caption("Anteprima non disponibile"); st.json(build_concept_map_image(plan_json, step_idx=i))
+        # Sezione mappa concettuale rimossa su richiesta
 
         # (spiegazione già mostrata nella sezione principale)
 

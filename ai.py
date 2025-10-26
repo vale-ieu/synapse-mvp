@@ -18,7 +18,7 @@ if not DEMO_MODE:
 
 from prompts import PLAN_PROMPT, TUTOR_PROMPT, EXERCISE_PROMPT, EXPLAIN_PROMPT
 
-def _fallback_plan(topic: str, level: str, time_per_day: int, goal_mode: str = "verifica_liceo") -> dict:
+def _fallback_plan(topic: str, level: str, time_per_day: int, goal_mode: str = "misto") -> dict:
     level_note = {
         "beginner": "spiegazioni semplici con esempi quotidiani",
         "intermediate": "spiegazioni operative con collegamenti tra concetti",
@@ -28,8 +28,10 @@ def _fallback_plan(topic: str, level: str, time_per_day: int, goal_mode: str = "
     # lunghezza variabile per obiettivo
     if goal_mode == "esame_universita":
         steps_count = 12
-    else:  # verifica liceo (default)
+    elif goal_mode == "verifica_liceo":
         steps_count = 9
+    else:  # misto bilanciato
+        steps_count = 11
 
     base_steps = [
         {
@@ -105,7 +107,7 @@ def _fallback_plan(topic: str, level: str, time_per_day: int, goal_mode: str = "
         "_meta": {"source": "fallback", "lang": "it"}
     }
 
-def generate_plan(topic: str, level: str = "beginner", time_per_day: int = 30, goal_mode: str = "verifica_liceo") -> dict:
+def generate_plan(topic: str, level: str = "beginner", time_per_day: int = 30, goal_mode: str = "misto") -> dict:
     if DEMO_MODE or client is None:
         return _fallback_plan(topic, level, time_per_day, goal_mode)
     try:

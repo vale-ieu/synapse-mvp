@@ -44,6 +44,18 @@ def _init_db():
         )
     """)
 
+    # cache AI per risparmiare costi: spiegazioni, esercizi, ecc.
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ai_cache (
+            plan_id INTEGER NOT NULL,
+            step_idx INTEGER NOT NULL,
+            kind TEXT NOT NULL,            -- es: 'explain_md', 'exercises_json', 'map_png_path'
+            content TEXT NOT NULL,        -- testo o path file
+            PRIMARY KEY(plan_id, step_idx, kind),
+            FOREIGN KEY(plan_id) REFERENCES plans(id)
+        )
+    """)
+
     # 2) Aggiunta colonne opzionali solo se mancano (robusta)
     c.execute("PRAGMA table_info(plans)")
     cols = {row[1] for row in c.fetchall()}
@@ -144,6 +156,27 @@ def update_plan_json(plan_id: int, plan_json_obj: dict):
     """Aggiorna il JSON del piano (sovrascrive)."""
     conn = _connect(); c = conn.cursor()
     c.execute("UPDATE plans SET plan_json=? WHERE id=?", (json.dumps(plan_json_obj), plan_id))
+    conn.commit(); conn.close()
+
+
+# ========================= AI CACHE =========================
+def get_ai_cache(plan_id: int, step_idx: int, kind: str) -> str | None:
+    conn = _connect(); c = conn.cursor()
+    c.execute("SELECT content FROM ai_cache WHERE plan_id=? AND step_idx=? AND kind=?", (plan_id, step_idx, kind))
+    row = c.fetchone(); conn.close()
+    return row[0] if row else None
+
+def set_ai_cache(plan_id: int, step_idx: int, kind: str, content: str):
+    conn = _connect(); c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO ai_cache(plan_id, step_idx, kind, content)
+        VALUES(?, ?, ?, ?)
+        ON CONFLICT(plan_id, step_idx, kind)
+        DO UPDATE SET content=excluded.content
+        """,
+        (plan_id, step_idx, kind, content)
+    )
     conn.commit(); conn.close()
 
 
